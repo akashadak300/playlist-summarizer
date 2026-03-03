@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Playlist {
+  id              String   @id @default(uuid())
+  title           String?
+  totalVideos     Int
+  processedVideos Int      @default(0)
+  status          String   // initialized | processing | paused | completed | failed
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  videos          Video[]
+}
+
+model Video {
+  id           String   @id @default(uuid())
+  playlistId   String
+  playlist     Playlist @relation(fields: [playlistId], references: [id])
+  videoId      String
+  title        String
+  orderIndex   Int
+  duration     Int      // seconds
+  thumbnail    String?
+  status       String   // pending | processing | completed | failed
+  currentStep  String   // captions | download | transcribe | summarize | done
+  transcript   String?  @db.Text
+  summary      String?  @db.Text
+  modelUsed    String?
+  promptUsed   String?  @db.Text
+  errorType    String?
+  errorMessage String?
+  summarizedAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  logs         Log[]
+}
+
+model Log {
+  id        String   @id @default(uuid())
+  videoId   String
+  video     Video    @relation(fields: [videoId], references: [id])
+  message   String
+  level     String   // info | error
+  createdAt DateTime @default(now())
+}
