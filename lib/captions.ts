@@ -7,7 +7,8 @@ export async function checkCaptionsAvailability(videoId: string): Promise<boolea
         writeAutoSub: true,
         writeSub: true,
         subLang: 'en',
-        forceIpv4: true
+        forceIpv4: true,
+        jsRuntimes: 'node'
     }) as any;
 
     const manualSubs = output.subtitles || {};
@@ -26,7 +27,8 @@ export async function fetchTranscriptText(videoId: string): Promise<string> {
         writeAutoSub: true,
         writeSub: true,
         subLang: 'en',
-        forceIpv4: true
+        forceIpv4: true,
+        jsRuntimes: 'node'
     }) as any;
 
     const manualSubs = output.subtitles || {};

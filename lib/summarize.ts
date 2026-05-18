@@ -3,6 +3,7 @@ import { MODEL_CONTEXT_LIMITS } from './constants';
 interface SummarizeParams {
     transcript: string;
     model: string;
+    finalModel?: string;
     apiKey: string;
     customPrompt: string;
     onProgress?: (progressMsg: string) => void;
@@ -56,7 +57,7 @@ const fetchOpenRouter = async (model: string, apiKey: string, systemPrompt: stri
     return data.choices[0].message.content.trim();
 };
 
-export const summarizeTranscript = async ({ transcript, model, apiKey, customPrompt, onProgress }: SummarizeParams): Promise<string> => {
+export const summarizeTranscript = async ({ transcript, model, finalModel, apiKey, customPrompt, onProgress }: SummarizeParams): Promise<string> => {
     const contextLimit = MODEL_CONTEXT_LIMITS[model as keyof typeof MODEL_CONTEXT_LIMITS] || 8000;
     const estTokens = estimateTokens(transcript);
 
@@ -127,7 +128,7 @@ export const summarizeTranscript = async ({ transcript, model, apiKey, customPro
     const finalInput = intermediateSummaries.map((s, idx) => `Part ${idx + 1}:\n${s}`).join('\n\n');
 
     const finalSummary = await fetchOpenRouter(
-        model,
+        finalModel || model,
         apiKey,
         "You are a helpful assistant that summarizes transcripts.",
         `${customPrompt}\n\nHere are the summaries of individual parts of the transcript. Create a cohesive structured final summary.\n\n${finalInput}`

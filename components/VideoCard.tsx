@@ -26,6 +26,7 @@ interface VideoCardProps {
     loadedTranscript?: string;
     onCheckCaptions: (id: string) => void;
     onFetchTranscript: (id: string) => void;
+    onWhisperTranscribe: (id: string) => void;
     onLoadTranscript: (id: string, hasTranscript: boolean) => void;
     onDownloadTranscript: (id: string, title: string) => void;
     onSummarize: (id: string) => void;
@@ -109,6 +110,7 @@ export default function VideoCard({
     loadedTranscript,
     onCheckCaptions,
     onFetchTranscript,
+    onWhisperTranscribe,
     onLoadTranscript,
     onDownloadTranscript,
     onSummarize,
@@ -295,8 +297,12 @@ export default function VideoCard({
                             <ActionButton disabled>Checking...</ActionButton>
                         )}
 
-                        {vid.status === 'captions_available' && !vid.hasTranscript && (
-                            <ActionButton variant="primary" onClick={() => onFetchTranscript(vid.id)} disabled={fetchingTranscripts.has(vid.id)}>
+                        {(vid.status === 'captions_available' || vid.status === 'no_captions') && !vid.hasTranscript && (
+                            <ActionButton 
+                                variant="primary" 
+                                onClick={() => vid.status === 'no_captions' ? onWhisperTranscribe(vid.id) : onFetchTranscript(vid.id)} 
+                                disabled={fetchingTranscripts.has(vid.id)}
+                            >
                                 {fetchingTranscripts.has(vid.id) ? 'Fetching...' : 'Fetch Transcript'}
                             </ActionButton>
                         )}
@@ -330,12 +336,7 @@ export default function VideoCard({
                             </ActionButton>
                         )}
 
-                        {vid.status === 'no_captions' && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <ActionButton variant="secondary" onClick={() => { }}>Download MP3</ActionButton>
-                                <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>Transcription not available.</span>
-                            </div>
-                        )}
+                        {/* no_captions fetch button combined above */}
                     </div>
                 </div>
             </div>

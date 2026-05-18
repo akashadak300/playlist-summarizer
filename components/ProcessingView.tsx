@@ -48,19 +48,23 @@ export default function ProcessingView({ playlistId, model, apiKey, customPrompt
     const [summarizingVideos, setSummarizingVideos] = useState<Set<string>>(new Set());
     const [isCheckingAll, setIsCheckingAll] = useState(false);
     const [isFetchingAll, setIsFetchingAll] = useState(false);
+    const [isSummarizingAll, setIsSummarizingAll] = useState(false);
     const [globalProgress, setGlobalProgress] = useState<{ done: number, total: number, label: string } | null>(null);
 
     // Unified Summarization States
     const [globalSettings, setGlobalSettings] = useState({
         model,
+        finalModel: '',
         prompt: customPrompt
     });
-    const [videoOverrides, setVideoOverrides] = useState<Record<string, { model: string, prompt: string }>>({});
+    const [videoOverrides, setVideoOverrides] = useState<Record<string, { model: string, finalModel: string, prompt: string }>>({});
 
     // Settings Modal State
     const [settingsModalContext, setSettingsModalContext] = useState<string | null>(null); // videoId
     const [modalModel, setModalModel] = useState("");
+    const [modalFinalModel, setModalFinalModel] = useState("");
     const [modalPrompt, setModalPrompt] = useState("");
+    const [showAdvanced, setShowAdvanced] = useState(false);
     const [modalSetAsDefault, setModalSetAsDefault] = useState(false);
     const [showSettingsTooltip, setShowSettingsTooltip] = useState(false);
 
@@ -70,10 +74,12 @@ export default function ProcessingView({ playlistId, model, apiKey, customPrompt
         const override = videoOverrides[videoId];
         if (override) {
             setModalModel(override.model);
+            setModalFinalModel(override.finalModel || '');
             setModalPrompt(override.prompt);
             setModalSetAsDefault(false);
         } else {
             setModalModel(globalSettings.model);
+            setModalFinalModel(globalSettings.finalModel || '');
             setModalPrompt(globalSettings.prompt);
             setModalSetAsDefault(true);
         }
@@ -85,14 +91,9 @@ export default function ProcessingView({ playlistId, model, apiKey, customPrompt
         if (modalSetAsDefault) {
             setGlobalSettings({
                 model: modalModel,
+                finalModel: modalFinalModel,
                 prompt: modalPrompt
             });
-            // Update the global override map intentionally? The spec says:
-            // "If checkbox is checked -> Update globalSettings. If unchecked -> Update videoOverrides[videoId]"
-            // "Do not alter already generated summaries"
-
-            // Should we wipe the override if they set as default? 
-            // Yes, structurally keeping it clean:
             setVideoOverrides(prev => {
                 const next = { ...prev };
                 delete next[settingsModalContext];
@@ -103,6 +104,7 @@ export default function ProcessingView({ playlistId, model, apiKey, customPrompt
                 ...prev,
                 [settingsModalContext]: {
                     model: modalModel,
+                    finalModel: modalFinalModel,
                     prompt: modalPrompt
                 }
             }));
@@ -175,11 +177,31 @@ export default function ProcessingView({ playlistId, model, apiKey, customPrompt
 
         let done = 0;
         for (const vid of fetchable) {
-            await handleFetchTranscript(vid.id);
+            if (vid.status === 'no_captions') {
+                await handleWhisperTranscribe(vid.id);
+            } else {
+                await handleFetchTranscript(vid.id);
+            }
             done++;
             setGlobalProgress({ done, total: fetchable.length, label: 'Fetching Transcripts' });
         }
         setIsFetchingAll(false);
+        setGlobalProgress(null);
+    };
+
+    const handleSummarizeAll = async () => {
+        if (!data) return;
+        setIsSummarizingAll(true);
+        const summarizable = data.videos.filter(v => v.hasTranscript && !v.summary && v.status !== 'processing');
+        setGlobalProgress({ done: 0, total: summarizable.length, label: 'Generating Summaries' });
+
+        let done = 0;
+        for (const vid of summarizable) {
+            await handleSummarize(vid.id);
+            done++;
+            setGlobalProgress({ done, total: summarizable.length, label: 'Generating Summaries' });
+        }
+        setIsSummarizingAll(false);
         setGlobalProgress(null);
     };
 
@@ -195,7 +217,7 @@ export default function ProcessingView({ playlistId, model, apiKey, customPrompt
             await fetch(`/api/video/${id}/summarize`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model: config.model, customPrompt: config.prompt, apiKey })
+                body: JSON.stringify({ model: config.model, finalModel: config.finalModel, customPrompt: config.prompt, apiKey })
             });
             // Polling handles subsequent state updates natively
         } catch (e) {
@@ -219,6 +241,25 @@ export default function ProcessingView({ playlistId, model, apiKey, customPrompt
             }
         } catch (e) {
             console.error("Failed transcript fetch", e);
+        } finally {
+            setFetchingTranscripts(prev => {
+                const next = new Set(prev);
+                next.delete(id);
+                return next;
+            });
+        }
+    };
+
+    const handleWhisperTranscribe = async (id: string) => {
+        setFetchingTranscripts(prev => new Set(prev).add(id));
+        try {
+            const res = await fetch(`/api/video/${id}/whisper-transcribe`, { method: 'POST' });
+            const json = await res.json();
+            if (json.transcript) {
+                setLoadedTranscripts(prev => ({ ...prev, [id]: json.transcript }));
+            }
+        } catch (e) {
+            console.error("Failed whisper transcription", e);
         } finally {
             setFetchingTranscripts(prev => {
                 const next = new Set(prev);
@@ -299,7 +340,7 @@ export default function ProcessingView({ playlistId, model, apiKey, customPrompt
                             {data.videos.some(v => v.status === 'pending') && (
                                 <button
                                     onClick={handleCheckAll}
-                                    disabled={isCheckingAll || isFetchingAll}
+                                    disabled={isCheckingAll || isFetchingAll || isSummarizingAll}
                                     style={{
                                         padding: '10px 16px',
                                         borderRadius: '8px',
@@ -307,8 +348,8 @@ export default function ProcessingView({ playlistId, model, apiKey, customPrompt
                                         color: '#fff',
                                         fontWeight: 600,
                                         border: '1px solid var(--border)',
-                                        cursor: (isCheckingAll || isFetchingAll) ? 'not-allowed' : 'pointer',
-                                        opacity: (isCheckingAll || isFetchingAll) ? 0.5 : 1,
+                                        cursor: (isCheckingAll || isFetchingAll || isSummarizingAll) ? 'not-allowed' : 'pointer',
+                                        opacity: (isCheckingAll || isFetchingAll || isSummarizingAll) ? 0.5 : 1,
                                     }}
                                 >
                                     Check Captions For All
@@ -317,7 +358,7 @@ export default function ProcessingView({ playlistId, model, apiKey, customPrompt
                             {data.videos.some(v => v.status !== 'pending' && !v.hasTranscript && v.currentStep !== 'download') && (
                                 <button
                                     onClick={handleFetchAllTranscripts}
-                                    disabled={isCheckingAll || isFetchingAll}
+                                    disabled={isCheckingAll || isFetchingAll || isSummarizingAll}
                                     style={{
                                         padding: '10px 16px',
                                         borderRadius: '8px',
@@ -325,11 +366,64 @@ export default function ProcessingView({ playlistId, model, apiKey, customPrompt
                                         color: '#fff',
                                         fontWeight: 600,
                                         border: 'none',
-                                        cursor: (isCheckingAll || isFetchingAll) ? 'not-allowed' : 'pointer',
-                                        opacity: (isCheckingAll || isFetchingAll) ? 0.6 : 1,
+                                        cursor: (isCheckingAll || isFetchingAll || isSummarizingAll) ? 'not-allowed' : 'pointer',
+                                        opacity: (isCheckingAll || isFetchingAll || isSummarizingAll) ? 0.6 : 1,
                                     }}
                                 >
-                                    Fetch Available Transcripts
+                                    Fetch Transcripts For All
+                                </button>
+                            )}
+                            {data.videos.some(v => v.hasTranscript && !v.summary && v.status !== 'processing') && (
+                                <button
+                                    onClick={handleSummarizeAll}
+                                    disabled={isCheckingAll || isFetchingAll || isSummarizingAll}
+                                    style={{
+                                        padding: '10px 16px',
+                                        borderRadius: '8px',
+                                        background: '#10b981',
+                                        color: '#fff',
+                                        fontWeight: 600,
+                                        border: 'none',
+                                        cursor: (isCheckingAll || isFetchingAll || isSummarizingAll) ? 'not-allowed' : 'pointer',
+                                        opacity: (isCheckingAll || isFetchingAll || isSummarizingAll) ? 0.6 : 1,
+                                        boxShadow: '0 0 12px rgba(16, 185, 129, 0.2)'
+                                    }}
+                                >
+                                    Summarize All
+                                </button>
+                            )}
+                            
+                            {/* ZIP Export Buttons */}
+                            {data.videos.some(v => v.hasTranscript) && (
+                                <button
+                                    onClick={() => window.location.href = `/api/playlist/${playlistId}/download-zip?type=transcripts`}
+                                    style={{
+                                        padding: '10px 16px',
+                                        borderRadius: '8px',
+                                        background: 'rgba(168, 85, 247, 0.15)',
+                                        color: '#c084fc',
+                                        fontWeight: 600,
+                                        border: '1px solid rgba(168, 85, 247, 0.3)',
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    🗂️ ZIP Transcripts
+                                </button>
+                            )}
+                            {data.videos.some(v => v.summary) && (
+                                <button
+                                    onClick={() => window.location.href = `/api/playlist/${playlistId}/download-zip?type=summaries`}
+                                    style={{
+                                        padding: '10px 16px',
+                                        borderRadius: '8px',
+                                        background: 'rgba(16, 185, 129, 0.15)',
+                                        color: '#10b981',
+                                        fontWeight: 600,
+                                        border: '1px solid rgba(16, 185, 129, 0.3)',
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    🗂️ ZIP Summaries
                                 </button>
                             )}
                         </div>
@@ -361,6 +455,7 @@ export default function ProcessingView({ playlistId, model, apiKey, customPrompt
                             loadedTranscript={loadedTranscripts[vid.id]}
                             onCheckCaptions={handleCheckCaptions}
                             onFetchTranscript={handleFetchTranscript}
+                            onWhisperTranscribe={handleWhisperTranscribe}
                             onLoadTranscript={loadTranscript}
                             onDownloadTranscript={downloadTranscript}
                             onSummarize={handleSummarize}
@@ -410,6 +505,29 @@ export default function ProcessingView({ playlistId, model, apiKey, customPrompt
                                 value={modalPrompt}
                                 onChange={e => setModalPrompt(e.target.value)}
                             />
+
+                            <div>
+                                <button 
+                                    onClick={() => setShowAdvanced(!showAdvanced)} 
+                                    style={{ background: 'transparent', border: 'none', color: 'var(--primary)', fontSize: '0.9rem', cursor: 'pointer', padding: 0, fontWeight: 500 }}
+                                >
+                                    {showAdvanced ? '▼ Hide Advanced Settings' : '▶ Show Advanced Settings'}
+                                </button>
+                                
+                                {showAdvanced && (
+                                    <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                        <ModelSelector
+                                            label="Master Model (For final summary of chunks)"
+                                            value={modalFinalModel || modalModel}
+                                            onChange={setModalFinalModel}
+                                            groups={MODEL_GROUPS}
+                                        />
+                                        <div style={{ fontSize: '0.8rem', color: 'var(--muted)', marginTop: '8px' }}>
+                                            Used only if the transcript is too large and needs chunking. Defaults to target model.
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
 
                             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', userSelect: 'none', color: 'rgba(255,255,255,0.9)', fontSize: '0.95rem' }}>
                                 <input

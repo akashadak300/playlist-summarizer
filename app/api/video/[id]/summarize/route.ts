@@ -12,7 +12,7 @@ export async function POST(
     try {
         const { id } = await params;
         const body = await req.json();
-        const { model, apiKey, customPrompt } = body;
+        const { model, finalModel, apiKey, customPrompt } = body;
 
         if (!id || !model || !apiKey || !customPrompt) {
             return NextResponse.json(
@@ -51,6 +51,7 @@ export async function POST(
         const finalSummary = await summarizeTranscript({
             transcript: video.transcript,
             model,
+            finalModel,
             apiKey,
             customPrompt
         });
