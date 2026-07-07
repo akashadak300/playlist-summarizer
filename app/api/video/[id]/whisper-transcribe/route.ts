@@ -21,7 +21,8 @@ export async function POST(
         }
 
         // Send to local Python backend (assuming it runs on port 8001)
-        const pyRes = await fetch('http://127.0.0.1:8001/api/transcribe', {
+        const whisperUrl = process.env.WHISPER_BACKEND_URL || 'http://127.0.0.1:8001';
+        const pyRes = await fetch(`${whisperUrl}/api/transcribe`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ video_url: `https://www.youtube.com/watch?v=${video.videoId}` })
